@@ -1,6 +1,6 @@
 # Predicting Cancer Therapy Response Through Patient-Specific Genome-Scale Metabolic Models
 
-**CS6024 — Computational Systems Biology, IIT Madras (2026)**
+**CS6024 Course Project, IIT Madras (2026)**
 **Author:** Chandrasekaran J · BS22B013 · Department of Biotechnology
 
 A multi-cohort framework for biomarker discovery and ML-based therapy recommendation from TCGA transcriptomic data. We integrate 11,505 TCGA RNA-seq profiles into the Recon3D human metabolic network using the GIMME algorithm, perform differential flux analysis to identify therapy-stratified biomarker reactions, and train LightGBM classifiers reaching out-of-fold AUCs of **0.785** (chemotherapy) and **0.818** (radiation therapy).
