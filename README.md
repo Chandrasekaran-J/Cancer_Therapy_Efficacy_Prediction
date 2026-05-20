@@ -5,7 +5,6 @@
 
 A multi-cohort framework for biomarker discovery and ML-based therapy recommendation from TCGA transcriptomic data. We integrate 11,505 TCGA RNA-seq profiles into the Recon3D human metabolic network using the GIMME algorithm, perform differential flux analysis to identify therapy-stratified biomarker reactions, and train LightGBM classifiers reaching out-of-fold AUCs of **0.785** (chemotherapy) and **0.818** (radiation therapy).
 
-> 📄 **Full project report:** [`docs/CS6024_project_report.pdf`](docs/CS6024_project_report.pdf)
 
 ---
 
@@ -33,9 +32,6 @@ CS6024_Project/
 ├── requirements.txt                       # Python dependencies
 ├── LICENSE
 ├── .gitignore
-│
-├── docs/
-│   └── CS6024_project_report.pdf          # Final 10-page report
 │
 ├── src/
 │   ├── 01_data_prep/
@@ -107,9 +103,8 @@ Patient-specific GIMME models (10,603 .pkl files)
 ### Requirements
 
 - Python 3.10+
-- Gurobi Optimizer (WLS or full licence)
-- HPC environment with SGE scheduler (recommended for full pipeline)
-- ~150 GB disk space for full FBA matrix + intermediate files
+- Gurobi Optimizer (WLS licence)
+
 
 ```bash
 pip install -r requirements.txt
@@ -192,7 +187,5 @@ Patient-level data should be placed under a separate `data/` directory (gitignor
   - Benjamini-Hochberg FDR correction at $q < 0.05$
 - **ML classifier:** LightGBM with Optuna hyperparameter tuning (TPE, 50 trials, 3-fold inner CV) and outer 5-fold stratified CV; SHAP TreeSHAP for interpretability
 - **Class imbalance:** `scale_pos_weight = N_Resistant / N_Sensitive`
-
-Full methodological details are in [`docs/CS6024_project_report.pdf`](docs/CS6024_project_report.pdf).
 
 ---
