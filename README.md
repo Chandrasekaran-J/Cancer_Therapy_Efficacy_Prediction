@@ -120,8 +120,4 @@ python -m compileall -q src tests
 bash -n submit_chunk.sh
 ```
 
-## Reference
-
-Chandrasekaran J and Karthik Rajesh. *Predicting Cancer Therapy Response Through Patient-Specific Genome-Scale Metabolic Models*. Manuscript in preparation.
-
 Software is distributed under the [MIT licence](LICENSE).
