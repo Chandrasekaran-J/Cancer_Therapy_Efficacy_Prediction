@@ -1,191 +1,127 @@
 # Predicting Cancer Therapy Response Through Patient-Specific Genome-Scale Metabolic Models
 
-**CS6024 Course Project, IIT Madras (2026)**
-**Author:** Chandrasekaran J · BS22B013 · Department of Biotechnology
+**Authors:** Chandrasekaran J and Karthik Rajesh
 
-A multi-cohort framework for biomarker discovery and ML-based therapy recommendation from TCGA transcriptomic data. We integrate 11,505 TCGA RNA-seq profiles into the Recon3D human metabolic network using the GIMME algorithm, perform differential flux analysis to identify therapy-stratified biomarker reactions, and train LightGBM classifiers reaching out-of-fold AUCs of **0.785** (chemotherapy) and **0.818** (radiation therapy).
+A research workflow connecting TCGA transcriptomics, genome-scale metabolic modelling, reaction-level biomarker discovery and machine learning for cancer therapy response. The study integrates 11,505 RNA-seq profiles with Recon3D using GIMME and examines outcomes across six treatment categories.
 
+## Study results
 
----
+| Quantity | Chemotherapy | Radiotherapy |
+|---|---:|---:|
+| Labelled patient–therapy observations | 1,719 | 1,595 |
+| Selected reaction features | 47 | 95 |
+| Genes mapped from selected reactions | 53 | 81 |
+| Pooled out-of-fold AUROC | 0.785 | 0.818 |
+| Balanced accuracy | 0.681 | 0.745 |
+| F1 score | 0.783 | 0.847 |
 
-## Key Results
+The two reaction sets share 37 candidates with concordant effect directions. These are the study's original results; the presentation and inference fixes in this repository do not constitute a new training run.
 
-| Metric | Chemotherapy | Radiation Therapy |
-|---|---|---|
-| Cohort size | 1,719 patients | 1,595 patients |
-| Significant biomarker reactions (FDR < 0.05) | 47 | 95 |
-| Unique encoding genes | 53 | 81 |
-| Best fold AUC | 0.826 | 0.845 |
-| **Out-of-Fold AUC** | **0.785** | **0.818** |
+## Repository contents
 
-- **10,603** patient-specific GSMMs successfully constructed (92.2% of 11,505 input profiles)
-- **12.5× larger** cohort than Lewis & Kemp (2021), the closest comparable prior work
-- All 37 shared biomarkers are **directionally concordant** between therapies, indicating a general metabolic resistance phenotype
+| Directory | Contents |
+|---|---|
+| `src/01_data_prep/` | Description of the upstream gene-mapping inputs |
+| `src/02_fba/` | Canonical reaction ordering, parallel FBA workers and HDF5 merging |
+| `src/03_qc/` | Model diagnostics and optional FVA/gap-filling utilities |
+| `src/04_biomarkers/` | Treatment-stratified differential tests, annotations and plots |
+| `src/05_ml/` | LightGBM training, prediction, shared feature encoding and SHAP plotting |
+| `src/06_visualization/` | Interactive cross-therapy comparison |
+| `tests/` | Regression checks for feature encoding and figure semantics |
+| `submit_chunk.sh` | SGE array-job template for the FBA and QC workers |
+| `results/` | Location for generated outputs |
 
----
+The executable workflow starts from prepared GIMME model files and sample/outcome manifests. The upstream expression-preprocessing and GIMME-extraction scripts are not included. Model files, flux matrices, trained estimators and patient-level data are supplied separately by the researcher.
 
-## Repository Structure
+## Installation
 
-```
-CS6024_Project/
-├── README.md                              # This file
-├── requirements.txt                       # Python dependencies
-├── LICENSE
-├── .gitignore
-│
-├── src/
-│   ├── 01_data_prep/
-│   │   └── gene_mapping.py                # HGNC ↔ Entrez ↔ Recon3D gene-ID mapping
-│   │
-│   ├── 02_fba/                            # FBA pipeline (SGE array jobs)
-│   │   ├── precompute_rxn_list_gurobi.py  # One-time: canonical reaction ordering
-│   │   ├── step1_fba_chunk_gurobi.py      # Per-chunk FBA worker
-│   │   └── step1_merge_gurobi.py          # Merge chunks → fba_matrix.h5
-│   │
-│   ├── 03_qc/                             # Model QC + FVA + gap-filling
-│   │   ├── step2_qc_chunk_gurobi.py       # Per-chunk QC worker
-│   │   ├── step2_merge_report_gurobi.py   # Merge QC reports
-│   │   └── step2b_fva_gapfill_gurobi.py   # Loopless FVA + MILP gap-fill
-│   │
-│   ├── 04_biomarkers/
-│   │   └── biomarkers_parallel.py         # Differential flux analysis (per therapy)
-│   │
-│   ├── 05_ml/
-│   │   └── ml_pipeline.py                 # LightGBM + Optuna + SHAP
-│   │
-│   └── 06_visualization/
-│       └── biomarker_scatter.py           # Cross-therapy log2FC scatter plot
-│
-└── results/                               # Pipeline outputs (created at runtime)
-```
-
----
-
-## Pipeline Overview
-
-The analysis pipeline runs in six stages. Each stage produces inputs for the next; the entire pipeline was executed on the IIT Madras Actinium HPC cluster (SGE scheduler).
-
-```
-TCGA RNA-seq (11,505 patients)
-        │
-        ▼
-[1] gene_mapping.py  ───────────► gene_map.pkl
-        │
-        ▼  (GIMME — external step, COBRApy)
-Patient-specific GIMME models (10,603 .pkl files)
-        │
-        ▼
-[2] FBA pipeline (parallel SGE array)
-    ├── precompute_rxn_list_gurobi.py   → rxn_list.pkl
-    ├── step1_fba_chunk_gurobi.py       → chunks/*.npz
-    └── step1_merge_gurobi.py           → fba_matrix.h5  (11505 × 10600)
-        │
-        ▼
-[3] QC + FVA + gap-fill (parallel SGE array)
-    ├── step2_qc_chunk_gurobi.py        → qc_chunk_*.csv
-    ├── step2_merge_report_gurobi.py    → qc_report.csv
-    └── step2b_fva_gapfill_gurobi.py    → gap-filled models
-        │
-        ▼
-[4] biomarkers_parallel.py  ──────► biomarkers/*.csv  (per therapy)
-        │
-        ▼
-[5] ml_pipeline.py  ──────────────► models/*.pkl, shap_*.png, OOF predictions
-        │
-        ▼
-[6] biomarker_scatter.py  ────────► biomarker_scatter.html (interactive)
-```
-
----
-
-## Quick Start
-
-### Requirements
-
-- Python 3.10+
-- Gurobi Optimizer (WLS licence)
-
+Use Python 3.10 or later and install the dependencies:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### Running Individual Stages
+FBA and the optional model-diagnostic utilities require an installed Gurobi Optimizer and a valid licence. Cluster paths and resource requests must be adapted to the local environment. Scripts with argument parsers document their inputs through `--help`.
+
+## Running the workflow
+
+Prepare the model pickles, the canonical reaction list, the transcriptomics manifest and the treatment-label table first. Review the path constants in the FBA scripts for the original HPC layout.
 
 ```bash
-# 1. Gene mapping (one-time)
-python src/01_data_prep/gene_mapping.py
-
-# 2. FBA pipeline
+# Run once to build the canonical reaction ordering.
 python src/02_fba/precompute_rxn_list_gurobi.py
-qsub submit_fba.sh                      # SGE array job: step1_fba_chunk
-python src/02_fba/step1_merge_gurobi.py
 
-# 3. QC and (optional) gap-filling
-qsub submit_qc.sh                       # SGE array job: step2_qc_chunk
-python src/03_qc/step2_merge_report_gurobi.py
-qsub submit_fva.sh --phase fva          # Optional: FVA + gap-fill
-qsub submit_fva.sh --phase gapfill
-python src/03_qc/step2b_fva_gapfill_gurobi.py --phase report
+# Activate your Python environment before submitting jobs.
+# Create the log directory before the scheduler opens its output files.
+mkdir -p logs
+qsub -t 1-58 submit_chunk.sh fba \
+  --manifest data/transcriptomics_manifest.tsv \
+  --pkl-dir data/models --out-dir results/fba_chunks --chunk-size 200
 
-# 4. Differential biomarker analysis
-python src/04_biomarkers/biomarkers_parallel.py --n-jobs 60
+# Run after the array completes.
+python src/02_fba/step1_merge_gurobi.py \
+  --results-dir results/fba_chunks --out results/fba_matrix.h5 \
+  --summary-csv results/fba_summary.csv
 
-# 5. ML pipeline
-python src/05_ml/ml_pipeline.py
+qsub -t 1-58 submit_chunk.sh qc \
+  --manifest data/transcriptomics_manifest.tsv \
+  --pkl-dir data/models --out-dir results/qc_chunks --chunk-size 200
+python src/03_qc/step2_merge_report_gurobi.py \
+  --qc-dir results/qc_chunks --out-csv results/qc_report.csv \
+  --out-txt results/qc_report.txt
 
-# 6. Cross-therapy scatter plot
-python src/06_visualization/biomarker_scatter.py
+python src/04_biomarkers/biomarkers_parallel.py \
+  --h5 results/fba_matrix.h5 --manifest data/patient_therapy_labels.tsv \
+  --out-dir results/biomarkers --n-jobs 8
+
+python src/05_ml/ml_pipeline.py --step train \
+  --h5 results/fba_matrix.h5 --manifest data/patient_therapy_labels.tsv \
+  --clinical data/clinical.tsv --biomarker-dir results/biomarkers \
+  --out-dir results/ml
+
+python src/06_visualization/biomarker_scatter.py \
+  --chemo results/biomarkers/Chemotherapy/biomarker_rxns_mapped.csv \
+  --radio results/biomarkers/Radiation_Therapy/biomarker_rxns_mapped.csv \
+  --output results/biomarker_scatter.html
 ```
 
-### Per-script Options
+Set the array range to `ceil(number_of_manifest_rows / chunk_size)`. The workers read `SGE_TASK_ID` directly. FVA and gap filling are optional utilities, not prerequisites for reproducing the study's reported single-solution FBA analysis.
 
-Each script has its own `--help`:
+To redraw a SHAP bar chart from an existing importance table without retraining:
 
 ```bash
-python src/04_biomarkers/biomarkers_parallel.py --help
-python src/05_ml/ml_pipeline.py --help
+python src/05_ml/plot_shap_importance.py \
+  --csv results/ml/Chemotherapy_shap_importance.csv \
+  --therapy Chemotherapy --out-dir results/ml
 ```
 
-For example, run biomarker analysis on a single therapy:
+The plotting command reclassifies reaction features from their names, preserves the supplied SHAP values, and writes PNG and vector PDF figures. Both `rxn_` and the legacy `flux_` prefix are recognized.
+
+## Analysis conventions
+
+- **Model construction:** Recon3D, GIMME expression threshold `ln(10)`, biomass requirement of 85% of the reference optimum, and pruning threshold `1e-6`.
+- **Outcome labels:** complete response, partial response and no measurable disease form the sensitive group; stable disease, persistent disease, progressive disease and no response form the resistant group. Unknown or uninformative outcomes are excluded.
+- **Differential analysis:** two-sided Mann–Whitney tests for cohorts larger than 500 observations; 10,000-shuffle two-sided permutation tests otherwise; and two-sided Fisher tests using the implemented positive-flux threshold `v > 1e-9`. Benjamini–Hochberg adjustment is applied separately to each test family. Selection takes the union at 0.05 for the large cohorts and 0.20 for the smaller cohorts.
+- **Effect summary:** `log2(clip((mean_sensitive + 1e-9) / (mean_resistant + 1e-9), 1e-9, 1e9))`, using signed flux means. Ratios near zero or involving negative flux require interpretation in the reaction's model direction.
+- **Classification:** binary reaction activity `abs(v) > 1e-9` plus 12 clinical covariates. Sensitive is the positive class. The study uses full-cohort reaction selection and three-fold Optuna tuning followed by five-fold stratified classification with fixed selected features and hyperparameters. The scores describe this workflow; independent validation of the complete selection procedure remains future work.
+- **SHAP:** feature attributions are calculated for the final refitted model. Blue bars identify reaction features and orange bars identify clinical covariates.
+
+See the stage READMEs for figure conventions and input details.
+
+## Data and software
+
+Expression and clinical data originate from [TCGA through the GDC Data Portal](https://portal.gdc.cancer.gov/). The reference reconstruction is [Recon3D](https://doi.org/10.1038/nbt.4072). Data and model outputs are excluded from version control.
+
+## Checks
 
 ```bash
-python src/04_biomarkers/biomarkers_parallel.py --therapy Chemotherapy
+python -m unittest discover -s tests -v
+python -m compileall -q src tests
+bash -n submit_chunk.sh
 ```
 
-Run just one step of the ML pipeline:
+## Reference
 
-```bash
-python src/05_ml/ml_pipeline.py --step train
-python src/05_ml/ml_pipeline.py --step predict
-```
+Chandrasekaran J and Karthik Rajesh. *Predicting Cancer Therapy Response Through Patient-Specific Genome-Scale Metabolic Models*. Manuscript in preparation.
 
----
-
-## Data Sources
-
-This pipeline operates on three external data sources (not included in the repo):
-
-| Source | Description | Access |
-|---|---|---|
-| TCGA RNA-seq | STAR-augmented gene counts (TPM, unstranded), 11,505 files | [GDC Data Portal](https://portal.gdc.cancer.gov/) |
-| TCGA Clinical | Patient demographics + treatment outcomes (RECIST-labelled) | GDC Data Portal |
-| Recon3D | Human metabolic network reference (SBML + MATLAB) | [VMH Database](https://www.vmh.life/) |
-
-Patient-level data should be placed under a separate `data/` directory (gitignored). See individual scripts for expected paths.
-
----
-
-## Methods Summary
-
-- **GSMM construction:** GIMME algorithm (Becker & Palsson 2008) on Recon3D (10,600 reactions, 2,248 genes) with cutoff $\ln(10) \approx 2.303$ and 85% of $v_{\max}$ biomass constraint
-- **FBA solver:** GLPK for GIMME phase, Gurobi for downstream FBA (WLS licence) — both guarantee LP optimality
-- **Differential flux tests:**
-  - Mann-Whitney U for cohorts with $N > 500$
-  - Vectorised permutation test (10,000 shuffles) for $N \leq 500$
-  - Fisher's exact for presence/absence in parallel
-  - Benjamini-Hochberg FDR correction at $q < 0.05$
-- **ML classifier:** LightGBM with Optuna hyperparameter tuning (TPE, 50 trials, 3-fold inner CV) and outer 5-fold stratified CV; SHAP TreeSHAP for interpretability
-- **Class imbalance:** `scale_pos_weight = N_Resistant / N_Sensitive`
-
----
+Software is distributed under the [MIT licence](LICENSE).

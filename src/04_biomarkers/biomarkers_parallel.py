@@ -301,7 +301,7 @@ def plot_volcano(df, therapy, out_dir, fdr_cutoff):
     ns      = ~(up | down)
     y_vals  = -np.log10(df["pvalue_magnitude_adj"].clip(lower=1e-300))
 
-    ax.scatter(df.loc[ns,   "log2_fold_change"], y_vals[ns],   c="grey", s=8,  alpha=0.4, label="NS")
+    ax.scatter(df.loc[ns,   "log2_fold_change"], y_vals[ns],   c="grey", s=8,  alpha=0.4, label="Below display cutoffs")
     ax.scatter(df.loc[up,   "log2_fold_change"], y_vals[up],   c="red",  s=12, alpha=0.7, label=f"Sensitive (n={up.sum()})")
     ax.scatter(df.loc[down, "log2_fold_change"], y_vals[down], c="blue", s=12, alpha=0.7, label=f"Resistant (n={down.sum()})")
 
@@ -313,14 +313,15 @@ def plot_volcano(df, therapy, out_dir, fdr_cutoff):
         ax.annotate(row["rxn_id"],
                     (row["log2_fold_change"],
                      -np.log10(max(row["pvalue_magnitude_adj"], 1e-300))),
-                    fontsize=6, alpha=0.85)
+                    fontsize=8, alpha=0.85)
 
     ax.set_xlabel("log2(Fold Change: Sensitive / Resistant)", fontsize=12)
     ax.set_ylabel("-log10(Adjusted p-value, magnitude test)", fontsize=12)
     ax.set_title(f"Differential Flux — {therapy} (FDR<{fdr_cutoff})", fontsize=14)
-    ax.legend(fontsize=9)
+    ax.legend(fontsize=9, title=f"Flux-test adjusted p < {fdr_cutoff}; |log2FC| > 0.5", title_fontsize=9)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "volcano_plot.png"), dpi=150)
+    plt.savefig(os.path.join(out_dir, "volcano_plot.png"), dpi=300)
+    plt.savefig(os.path.join(out_dir, "volcano_plot.pdf"), bbox_inches="tight")
     plt.close()
 
 
@@ -336,9 +337,9 @@ def plot_top_biomarkers(df, therapy, out_dir, fdr_cutoff, n=30):
     fig, ax = plt.subplots(figsize=(10, max(6, len(sig) * 0.35)))
     ax.barh(range(len(sig)), sig["auc"], color=colors, alpha=0.80)
     ax.set_yticks(range(len(sig)))
-    ax.set_yticklabels(sig["rxn_id"], fontsize=8)
-    ax.set_xlabel("AUC (reaction discriminability)", fontsize=12)
-    ax.set_title(f"Significant Biomarkers — {therapy} (FDR<{fdr_cutoff})", fontsize=13)
+    ax.set_yticklabels(sig["rxn_id"], fontsize=10)
+    ax.set_xlabel("Single-reaction AUC: max(AUC, 1 - AUC)", fontsize=12)
+    ax.set_title(f"Selected reactions by test category — {therapy} (FDR<{fdr_cutoff})", fontsize=13)
     ax.axvline(0.5, color="black", linestyle="--", lw=0.8)
     ax.invert_yaxis()
 
@@ -349,7 +350,8 @@ def plot_top_biomarkers(df, therapy, out_dir, fdr_cutoff, n=30):
     ]
     ax.legend(handles=patches, fontsize=8)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "top_biomarkers.png"), dpi=150)
+    plt.savefig(os.path.join(out_dir, "top_biomarkers.png"), dpi=300)
+    plt.savefig(os.path.join(out_dir, "top_biomarkers.pdf"), bbox_inches="tight")
     plt.close()
 
 
@@ -364,7 +366,8 @@ def plot_biomarker_type_breakdown(df, therapy, out_dir):
            autopct="%1.1f%%", startangle=90)
     ax.set_title(f"Biomarker Type Breakdown — {therapy}", fontsize=13)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "biomarker_type_breakdown.png"), dpi=150)
+    plt.savefig(os.path.join(out_dir, "biomarker_type_breakdown.png"), dpi=300)
+    plt.savefig(os.path.join(out_dir, "biomarker_type_breakdown.pdf"), bbox_inches="tight")
     plt.close()
 
 

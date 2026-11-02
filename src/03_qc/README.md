@@ -9,3 +9,5 @@ Per-model checks: FBA feasibility, objective value, dead-end metabolites, struct
 | `step2b_fva_gapfill_gurobi.py` | Three-phase loopless FVA + MILP gap-fill |
 
 `step2b` uses three phases controlled by `--phase {fva, gapfill, report}` and should be run in that order.
+
+The study used the structural and single-solution FBA diagnostics. Complete FVA and systematic gap filling were not applied across the reported model collection; the optional utilities are included for subsequent analyses.

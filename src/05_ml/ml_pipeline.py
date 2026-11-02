@@ -21,6 +21,9 @@ import logging
 import warnings
 import pickle
 
+from feature_schema import is_reaction_feature, reaction_activity, reaction_feature_row
+from plot_shap_importance import plot_shap_importance
+
 import numpy as np
 import pandas as pd
 import h5py
@@ -163,7 +166,7 @@ def build_features(therapy, manifest, clinical, fluxes, uuids, rxn_ids, biomarke
 
         # Flux → binary presence/absence (1 if active, 0 if silent)
         flux_vals   = fluxes[h5_idx, rxn_indices]
-        binary_vals = (np.abs(flux_vals) > 1e-9).astype(int)
+        binary_vals = reaction_activity(flux_vals)
 
         # Clinical features
         clin = {}
@@ -214,7 +217,8 @@ def train_model(therapy, feature_df, valid_rxns, out_dir):
     n_r = (y == 0).sum()
     log.info(f"  Sensitive={n_s}, Resistant={n_r}, Features={len(feature_cols)}")
 
-    # ── Optuna hyperparameter search (inner 3-fold CV) ───────────────────────
+    # Three-fold hyperparameter search, preceding five-fold evaluation.
+    # This reproduces the reported workflow; it is not fully nested CV.
     log.info("  Running Optuna hyperparameter search...")
 
     def objective(trial):
@@ -277,7 +281,7 @@ def train_model(therapy, feature_df, valid_rxns, out_dir):
         os.path.join(out_dir, f"{therapy.replace(' ','_')}_best_params.csv"), index=False
     )
 
-    # ── Outer 5-fold CV with best params ─────────────────────────────────────
+    # Five-fold evaluation with the selected feature set and fixed best params.
     skf     = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=42)
     cv_aucs = []
     cv_bacs = []
@@ -365,41 +369,16 @@ def train_model(therapy, feature_df, valid_rxns, out_dir):
         "feature":    feature_cols,
         "mean_abs_shap": mean_shap,
     }).sort_values("mean_abs_shap", ascending=False).reset_index(drop=True)
-    shap_df["rank"]        = shap_df.index + 1
-    shap_df["feature_type"] = shap_df["feature"].apply(
-        lambda f: "clinical" if not f.startswith("flux_") else "metabolic_flux"
-    )
-    shap_df.to_csv(
-        os.path.join(out_dir, f"{therapy.replace(' ','_')}_shap_importance.csv"),
-        index=False
-    )
-
-    # SHAP summary bar plot
-    plt.figure(figsize=(10, 8))
-    top_n  = 30
-    top_df = shap_df.head(top_n)
-    colors = ["steelblue" if t == "metabolic_flux" else "darkorange"
-              for t in top_df["feature_type"]]
-    plt.barh(range(len(top_df)), top_df["mean_abs_shap"], color=colors, alpha=0.8)
-    plt.yticks(range(len(top_df)), top_df["feature"].str.replace("flux_", ""), fontsize=8)
-    plt.xlabel("Mean |SHAP value|", fontsize=12)
-    plt.title(f"Top {top_n} Features — {therapy}", fontsize=13)
-    plt.gca().invert_yaxis()
-
-    from matplotlib.patches import Patch
-    legend = [Patch(color="steelblue",  alpha=0.8, label="Metabolic flux"),
-              Patch(color="darkorange", alpha=0.8, label="Clinical")]
-    plt.legend(handles=legend, fontsize=9)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"{therapy.replace(' ','_')}_shap_bar.png"), dpi=150)
-    plt.close()
+    # Classify rxn_ features correctly, then save CSV, PNG and vector PDF.
+    shap_df = plot_shap_importance(shap_df, therapy, out_dir)
 
     # SHAP beeswarm
     plt.figure(figsize=(10, 8))
     shap.summary_plot(shap_vals_final, X, max_display=30, show=False)
     plt.title(f"SHAP Summary — {therapy}", fontsize=13)
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, f"{therapy.replace(' ','_')}_shap_beeswarm.png"), dpi=150)
+    plt.savefig(os.path.join(out_dir, f"{therapy.replace(' ','_')}_shap_beeswarm.png"), dpi=300)
+    plt.savefig(os.path.join(out_dir, f"{therapy.replace(' ','_')}_shap_beeswarm.pdf"), bbox_inches="tight")
     plt.close()
 
     log.info(f"  Top 5 features by SHAP:")
@@ -430,14 +409,9 @@ def predict_unlabeled(manifest, clinical, fluxes, uuids, rxn_ids,
         if uid not in uuid_to_h5idx:
             return None
         h5_idx    = uuid_to_h5idx[uid]
-        flux_cols = [c for c in feature_cols if c.startswith("rxn_")]
-        clin_cols = [c for c in feature_cols if not c.startswith("rxn_")]
-
-        row = {}
-        for col in flux_cols:
-            rxn = col.replace("flux_", "")
-            idx = rxn_to_idx.get(rxn)
-            row[col] = fluxes[h5_idx, idx] if idx is not None else 0.0
+        flux_cols = [c for c in feature_cols if is_reaction_feature(c)]
+        clin_cols = [c for c in feature_cols if not is_reaction_feature(c)]
+        row = reaction_feature_row(fluxes[h5_idx], flux_cols, rxn_to_idx)
 
         if case_uid in clinical.index:
             clin_row = clinical.loc[case_uid]
@@ -578,6 +552,8 @@ def main():
     parser.add_argument("--h5",       default=H5_PATH)
     parser.add_argument("--manifest", default=MANIFEST_PATH)
     parser.add_argument("--clinical", default=CLINICAL_PATH)
+    parser.add_argument("--biomarker-dir", default=BIOMARKER_DIR,
+                        help="Directory containing per-therapy top_biomarkers.csv files")
     parser.add_argument("--out-dir",  default=OUT_DIR)
     args = parser.parse_args()
 
@@ -601,14 +577,14 @@ def main():
 
         chemo_df, chemo_rxns = build_features(
             "Chemotherapy", manifest, clinical, fluxes, uuids, rxn_ids,
-            CHEMO_BIOMARKERS_CSV
+            os.path.join(args.biomarker_dir, "Chemotherapy", "top_biomarkers.csv")
         )
         chemo_df.to_csv(os.path.join(args.out_dir, "chemo_features.csv"), index=False)
         log.info(f"  Saved: chemo_features.csv ({len(chemo_df)} patients)")
 
         rad_df, rad_rxns = build_features(
             "Radiation Therapy", manifest, clinical, fluxes, uuids, rxn_ids,
-            RAD_BIOMARKERS_CSV
+            os.path.join(args.biomarker_dir, "Radiation_Therapy", "top_biomarkers.csv")
         )
         rad_df.to_csv(os.path.join(args.out_dir, "radiation_features.csv"), index=False)
         log.info(f"  Saved: radiation_features.csv ({len(rad_df)} patients)")

@@ -1,202 +1,110 @@
-import pandas as pd
+"""Compare therapy-specific biomarker tables with explicit projection semantics."""
+
+import argparse
+from html import escape
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
-import sys
 
-CHEMO_CSV   = "./Chemotherapy/biomarker_rxns_mapped.csv"
-RADIO_CSV   = "./Radiation_Therapy/biomarker_rxns_mapped.csv"
-OUTPUT_HTML = "./biomarker_scatter.html"
+X_REAL = [-6, -5, -4, -3, -2, -1, 0, 0.25, 0.5, 0.75, 1.0]
+Y_REAL = [-30, -7, -5, -3, -1, 0, 0.5, 1.0, 1.5, 2.0]
+X_DISPLAY = list(range(-5, 6))
+Y_DISPLAY = list(range(-4, 6))
 
-def load(path, label):
-    df = pd.read_csv(path)
-    df.columns = df.columns.str.strip()
+
+def load(path):
+    frame = pd.read_csv(path)
+    frame.columns = frame.columns.str.strip()
     required = {"rxn_id", "log2_fold_change", "rxn_name"}
-    missing = required - set(df.columns)
-    if missing:
-        print(f"[ERROR] {label} CSV missing columns: {missing}")
-        sys.exit(1)
-    df = df[["rxn_id","log2_fold_change","rxn_name"]].copy()
-    df["log2_fold_change"] = pd.to_numeric(df["log2_fold_change"], errors="coerce")
-    return df.dropna(subset=["log2_fold_change"])
+    if not required.issubset(frame.columns):
+        raise ValueError(f"Missing columns: {sorted(required - set(frame.columns))}")
+    frame = frame[["rxn_id", "log2_fold_change", "rxn_name"]].copy()
+    frame["log2_fold_change"] = pd.to_numeric(frame["log2_fold_change"], errors="raise")
+    if frame["rxn_id"].duplicated().any():
+        raise ValueError("Reaction identifiers must be unique within each therapy table")
+    if not np.isfinite(frame["log2_fold_change"]).all():
+        raise ValueError("Fold changes must be finite")
+    return frame
 
-chemo = load(CHEMO_CSV, "Chemo")
-radio = load(RADIO_CSV, "Radio")
 
-merged     = chemo.merge(radio, on="rxn_id", suffixes=("_chemo","_radio"))
-chemo_only = chemo[~chemo["rxn_id"].isin(merged["rxn_id"])].copy()
-radio_only = radio[~radio["rxn_id"].isin(merged["rxn_id"])].copy()
-print(f"Shared:{len(merged)}  Chemo-only:{len(chemo_only)}  Radio-only:{len(radio_only)}")
+def to_display(value, real, display):
+    """Piecewise-linear coordinates with extrapolation, avoiding edge clipping."""
+    if value < real[0]:
+        return display[0] + (value - real[0]) * (display[1] - display[0]) / (real[1] - real[0])
+    if value > real[-1]:
+        return display[-1] + (value - real[-1]) * (display[-1] - display[-2]) / (real[-1] - real[-2])
+    return float(np.interp(value, real, display))
 
-# ── UNIFORM GRID MAPPING ──────────────────────────────────────────────────────
-# Every tick occupies exactly 1 unit of display space.
-# Real values → display positions (uniform step = 1)
 
-# Y axis ticks (real values) in order low→high:
-Y_REAL    = [-30, -7, -5, -3, -1,  0, 0.5, 1.0, 1.5, 2.0]
-Y_DISPLAY = [ -4, -3, -2, -1,  0,  1,   2,   3,   4,   5]  # uniform step=1
+def build_figure(chemo, radio):
+    shared = chemo.merge(radio, on="rxn_id", suffixes=("_chemo", "_radio"), validate="one_to_one")
+    chemo_only = chemo[~chemo.rxn_id.isin(shared.rxn_id)]
+    radio_only = radio[~radio.rxn_id.isin(shared.rxn_id)]
+    tx = lambda value: to_display(value, X_REAL, X_DISPLAY)
+    ty = lambda value: to_display(value, Y_REAL, Y_DISPLAY)
+    fig = go.Figure()
+    common_hover = [
+        f"<b>{escape(str(r.rxn_id))}</b><br>{escape(str(r.rxn_name_chemo))}<br>"
+        f"Chemotherapy log₂FC: {r.log2_fold_change_chemo:+.3f}<br>"
+        f"Radiotherapy log₂FC: {r.log2_fold_change_radio:+.3f}"
+        for r in shared.itertuples()
+    ]
+    fig.add_trace(go.Scatter(
+        x=[tx(v) for v in shared.log2_fold_change_chemo],
+        y=[ty(v) for v in shared.log2_fold_change_radio],
+        mode="markers", name=f"Shared (n={len(shared)})",
+        marker=dict(color="mediumpurple", size=10, symbol="circle"),
+        customdata=common_hover, hovertemplate="%{customdata}<extra></extra>"))
+    for table, therapy, colour, symbol, horizontal in (
+            (chemo_only, "Chemotherapy", "#1abcb0", "triangle-up", True),
+            (radio_only, "Radiotherapy", "#f5a623", "square", False)):
+        opposite = "Radiotherapy" if horizontal else "Chemotherapy"
+        hover = [
+            f"<b>{escape(str(r.rxn_id))}</b><br>{escape(str(r.rxn_name))}<br>"
+            f"{therapy} log₂FC: {r.log2_fold_change:+.3f}<br>"
+            f"{opposite}: not selected in the supplied table.<br>"
+            "The other coordinate is an axis projection, not a measured zero effect."
+            for r in table.itertuples()
+        ]
+        fig.add_trace(go.Scatter(
+            x=[tx(v) for v in table.log2_fold_change] if horizontal else [tx(0)] * len(table),
+            y=[ty(0)] * len(table) if horizontal else [ty(v) for v in table.log2_fold_change],
+            mode="markers", name=f"{therapy}-only, projected (n={len(table)})",
+            marker=dict(color=colour, size=9, symbol=symbol),
+            customdata=hover, hovertemplate="%{customdata}<extra></extra>"))
+    fig.add_hline(y=ty(0), line_dash="dash", line_color="grey", line_width=1)
+    fig.add_vline(x=tx(0), line_dash="dash", line_color="grey", line_width=1)
+    fig.update_layout(
+        title=dict(text="Reaction effects across chemotherapy and radiotherapy", font_size=18),
+        xaxis=dict(title="Chemotherapy log₂FC (sensitive / resistant)",
+                   tickvals=X_DISPLAY, ticktext=[str(v) for v in X_REAL]),
+        yaxis=dict(title="Radiotherapy log₂FC (sensitive / resistant)",
+                   tickvals=Y_DISPLAY, ticktext=[str(v) for v in Y_REAL]),
+        annotations=[dict(x=0, y=-0.18, xref="paper", yref="paper", xanchor="left",
+                          showarrow=False, align="left", font_size=12,
+                          text="Both axes use piecewise-linear tick spacing.<br>"
+                               "Therapy-only candidates are projected to the other zero axis; "
+                               "that coordinate is not an estimated effect.")],
+        legend=dict(orientation="h", y=1.10, x=0),
+        font=dict(size=13), template="plotly_white",
+        width=1050, height=760, margin=dict(l=90, r=35, t=120, b=130))
+    return fig
 
-# X axis ticks (real values) in order low→high:
-X_REAL    = [-6, -5, -4, -3, -2, -1,    0, 0.25, 0.5, 0.75, 1.0]
-X_DISPLAY = [-5, -4, -3, -2, -1,  0,    1,    2,   3,    4,   5]  # uniform step=1
 
-def to_display(v, real_arr, disp_arr):
-    """Map a real value to its uniform display coordinate via linear interpolation."""
-    real_arr = np.array(real_arr, dtype=float)
-    disp_arr = np.array(disp_arr, dtype=float)
-    if v <= real_arr[0]:  return disp_arr[0]
-    if v >= real_arr[-1]: return disp_arr[-1]
-    for i in range(len(real_arr)-1):
-        if real_arr[i] <= v <= real_arr[i+1]:
-            t = (v - real_arr[i]) / (real_arr[i+1] - real_arr[i])
-            return disp_arr[i] + t * (disp_arr[i+1] - disp_arr[i])
-    return disp_arr[-1]
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--chemo", default="./Chemotherapy/biomarker_rxns_mapped.csv")
+    parser.add_argument("--radio", default="./Radiation_Therapy/biomarker_rxns_mapped.csv")
+    parser.add_argument("--output", default="biomarker_scatter.html")
+    args = parser.parse_args()
+    fig = build_figure(load(args.chemo), load(args.radio))
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(output, include_plotlyjs=True, full_html=True)
+    print(f"Saved {output}")
 
-def tx(v): return to_display(v, X_REAL, X_DISPLAY)
-def ty(v): return to_display(v, Y_REAL, Y_DISPLAY)
 
-def dir(fc): return "higher in Sensitive" if fc > 0 else "higher in Resistant"
-
-# ── TICK LABELS (bold -30) ────────────────────────────────────────────────────
-y_tickvals = Y_DISPLAY
-y_ticktext = ["<b>−30</b>" if r==-30 else f"<b>{int(r) if r==int(r) else r}</b>" for r in Y_REAL]
-
-x_tickvals = X_DISPLAY
-x_ticktext = [f"<b>{int(r) if r==int(r) else r}</b>" for r in X_REAL]
-
-# axis display limits
-xmin, xmax = X_DISPLAY[0]-0.4, X_DISPLAY[-1]+0.4
-ymin, ymax = Y_DISPLAY[0]-0.4, Y_DISPLAY[-1]+0.4
-
-# zero-axis display coords
-x0d = tx(0)   # display x=0
-y0d = ty(0)   # display y=0
-
-# ── HOVER ─────────────────────────────────────────────────────────────────────
-def hover_shared(row):
-    same = (row.log2_fold_change_chemo>0)==(row.log2_fold_change_radio>0)
-    return (f"<b>{row.rxn_id}</b><br>{row.rxn_name_chemo}<br><br>"
-            f"Chemo log₂FC: {row.log2_fold_change_chemo:+.3f}  ({dir(row.log2_fold_change_chemo)})<br>"
-            f"Radio log₂FC: {row.log2_fold_change_radio:+.3f}  ({dir(row.log2_fold_change_radio)})<br><br>"
-            f"<i>{'Same direction in both ✓' if same else 'Opposite directions ✗'}</i>")
-
-def hover_chemo(row):
-    return (f"<b>{row.rxn_id}</b><br>{row.rxn_name}<br><br>"
-            f"Chemo log₂FC: {row.log2_fold_change:+.3f}  ({dir(row.log2_fold_change)})<br><br>"
-            f"<i>Chemo-only biomarker</i>")
-
-def hover_radio(row):
-    return (f"<b>{row.rxn_id}</b><br>{row.rxn_name}<br><br>"
-            f"Radio log₂FC: {row.log2_fold_change:+.3f}  ({dir(row.log2_fold_change)})<br><br>"
-            f"<i>Radio-only biomarker</i>")
-
-# ── FIGURE ────────────────────────────────────────────────────────────────────
-fig = go.Figure()
-
-shapes = [
-    # Q1 both sensitive
-    dict(type="rect",xref="x",yref="y",x0=x0d,x1=xmax,y0=y0d,y1=ymax,
-         fillcolor="rgba(29,158,117,0.08)",line_width=0,layer="below"),
-    # Q3 both resistant
-    dict(type="rect",xref="x",yref="y",x0=xmin,x1=x0d,y0=ymin,y1=y0d,
-         fillcolor="rgba(220,55,55,0.07)",line_width=0,layer="below"),
-    # Q2 radio-sensitive/chemo-resistant
-    dict(type="rect",xref="x",yref="y",x0=xmin,x1=x0d,y0=y0d,y1=ymax,
-         fillcolor="rgba(239,159,39,0.04)",line_width=0,layer="below"),
-    # Q4 chemo-sensitive/radio-resistant
-    dict(type="rect",xref="x",yref="y",x0=x0d,x1=xmax,y0=ymin,y1=y0d,
-         fillcolor="rgba(55,138,221,0.04)",line_width=0,layer="below"),
-    # zero lines
-    dict(type="line",xref="x",yref="y",x0=xmin,x1=xmax,y0=y0d,y1=y0d,
-         line=dict(color="rgba(120,120,120,0.45)",width=1,dash="dash")),
-    dict(type="line",xref="x",yref="y",x0=x0d,x1=x0d,y0=ymin,y1=ymax,
-         line=dict(color="rgba(120,120,120,0.45)",width=1,dash="dash")),
-    # -30 highlight line (dotted red)
-    dict(type="line",xref="x",yref="y",x0=xmin,x1=xmax,
-         y0=ty(-30),y1=ty(-30),
-         line=dict(color="rgba(210,60,60,0.4)",width=1,dash="dot")),
-]
-
-annotations = [
-    dict(x=0.98,y=0.98,xref="paper",yref="paper",text="Both Sensitive ↗",
-         showarrow=False,font=dict(size=11,color="rgba(20,140,100,0.75)"),
-         xanchor="right",yanchor="top"),
-    dict(x=0.02,y=0.02,xref="paper",yref="paper",text="↙ Both Resistant",
-         showarrow=False,font=dict(size=11,color="rgba(200,50,50,0.75)"),
-         xanchor="left",yanchor="bottom"),
-    dict(x=0.02,y=0.98,xref="paper",yref="paper",
-         text="Radio-Sensitive / Chemo-Resistant",
-         showarrow=False,font=dict(size=11,color="rgba(180,120,20,0.7)"),
-         xanchor="left",yanchor="top"),
-    dict(x=0.98,y=0.02,xref="paper",yref="paper",
-         text="Chemo-Sensitive / Radio-Resistant",
-         showarrow=False,font=dict(size=11,color="rgba(40,110,200,0.7)"),
-         xanchor="right",yanchor="bottom"),
-]
-
-# Traces — map real values through uniform transform
-fig.add_trace(go.Scatter(
-    x=[tx(r.log2_fold_change_chemo) for _,r in merged.iterrows()],
-    y=[ty(r.log2_fold_change_radio)  for _,r in merged.iterrows()],
-    mode="markers", name=f"Both therapies (n={len(merged)})",
-    marker=dict(color="rgba(123,104,238,0.88)",size=10,
-                line=dict(color="#4A3FCC",width=1.2)),
-    hovertemplate="%{customdata}<extra></extra>",
-    customdata=[hover_shared(r) for _,r in merged.iterrows()],
-))
-
-fig.add_trace(go.Scatter(
-    x=[tx(r.log2_fold_change) for _,r in chemo_only.iterrows()],
-    y=[ty(0)]*len(chemo_only),
-    mode="markers", name=f"Chemo-only (n={len(chemo_only)})",
-    marker=dict(color="rgba(26,188,176,0.88)",size=9,symbol="triangle-up",
-                line=dict(color="#0E8A82",width=1)),
-    hovertemplate="%{customdata}<extra></extra>",
-    customdata=[hover_chemo(r) for _,r in chemo_only.iterrows()],
-))
-
-fig.add_trace(go.Scatter(
-    x=[tx(0)]*len(radio_only),
-    y=[ty(r.log2_fold_change) for _,r in radio_only.iterrows()],
-    mode="markers", name=f"Radio-only (n={len(radio_only)})",
-    marker=dict(color="rgba(245,166,35,0.88)",size=9,symbol="square",
-                line=dict(color="#C47F00",width=1)),
-    hovertemplate="%{customdata}<extra></extra>",
-    customdata=[hover_radio(r) for _,r in radio_only.iterrows()],
-))
-
-fig.update_layout(
-    shapes=shapes, annotations=annotations,
-    xaxis=dict(
-        range=[xmin,xmax], zeroline=False,
-        gridcolor="rgba(150,150,150,0.13)",
-        tickvals=x_tickvals, ticktext=x_ticktext,
-        tickfont=dict(size=12,family="Arial Black"),
-        title=dict(text="Chemo log₂FC (Sensitive / Resistant)",
-                   font=dict(size=13)),
-        mirror=True, showline=True, linecolor="rgba(100,100,100,0.4)",
-    ),
-    yaxis=dict(
-        range=[ymin,ymax], zeroline=False,
-        gridcolor="rgba(150,150,150,0.13)",
-        tickvals=y_tickvals, ticktext=y_ticktext,
-        tickfont=dict(size=12,family="Arial Black"),
-        title=dict(text="Radio log₂FC (Sensitive / Resistant)",
-                   font=dict(size=13)),
-        mirror=True, showline=True, linecolor="rgba(100,100,100,0.4)",
-    ),
-    legend=dict(orientation="h",yanchor="bottom",y=1.02,
-                xanchor="center",x=0.5,font=dict(size=12),itemsizing="constant"),
-    hoverlabel=dict(bgcolor="rgba(20,20,20,0.93)",
-                    font=dict(color="white",size=12),
-                    bordercolor="rgba(255,255,255,0.15)"),
-    plot_bgcolor="white", paper_bgcolor="white",
-    margin=dict(l=80,r=80,t=80,b=80),
-    width=860, height=680,
-)
-
-html = fig.to_html(include_plotlyjs="cdn", full_html=True)
-html = html.replace("<body>",
-    "<body style='display:flex;justify-content:center;padding:20px;background:#fff;'>")
-with open(OUTPUT_HTML,"w") as f:
-    f.write(html)
-print(f"Saved → {OUTPUT_HTML}")
+if __name__ == "__main__":
+    main()

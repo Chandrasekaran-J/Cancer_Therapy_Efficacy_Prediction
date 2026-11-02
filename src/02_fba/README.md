@@ -1,6 +1,6 @@
 # Stage 2 — Flux Balance Analysis
 
-Runs FBA on all 10,603 patient-specific GIMME models on the HPC cluster.
+Runs FBA on the patient-specific GIMME models (11,505 profiles in the study) on the HPC cluster.
 
 | Script | Purpose | When to run |
 |---|---|---|

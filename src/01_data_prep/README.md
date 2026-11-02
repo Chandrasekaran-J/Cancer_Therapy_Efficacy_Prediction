@@ -1,11 +1,5 @@
-# Stage 1 — Data Preparation
+# Stage 1 — Data preparation inputs
 
-Builds the gene-mapping table linking RNA-seq gene symbols to Recon3D reactions via a two-step chain:
+The upstream workflow maps RNA-seq gene symbols through Entrez identifiers to Recon3D gene identifiers and aggregates expression through gene–protein–reaction rules for GIMME model extraction. The study resolved 1,675 reference gene identifiers through MyGene.info.
 
-```
-HGNC symbol → Entrez base ID → Recon3D gene ID (EntrezID_AT1)
-```
-
-This mapping is required for GIMME score aggregation and biomarker backtracking.
-
-**Output:** `gene_map.pkl` containing the lookup table (~1,865 entries).
+This directory documents that input stage. The original gene-mapping and GIMME-extraction scripts are not included in the repository. Supply the prepared model pickles, mapping table and manifests before running the downstream FBA and biomarker scripts.

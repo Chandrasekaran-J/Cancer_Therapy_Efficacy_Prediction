@@ -9,7 +9,9 @@ Identifies metabolic reactions with significantly different flux/presence betwee
 **Biomarker classification:**
 - `flux_only` — magnitude test significant only
 - `presence_only` — Fisher's exact only
-- `both` — both tests significant (strongest)
+- `both` — both tests significant
 - `none` — neither
 
 **Outputs:** per-therapy CSV files with rxn_id, log2FC, p-values, FDR, biomarker type, gene/metabolite annotations.
+
+Volcano colours require both a flux-test adjusted p-value below the cohort cutoff and `abs(log2FC) > 0.5`. Grey points are below one or both display cutoffs, including some reactions selected by the two-test union. The displayed bar-chart subset follows test-category and adjusted-p ordering, not an AUC ranking. Its single-reaction AUC is oriented as `max(AUC, 1-AUC)`. Plots are exported as 300-dpi PNG and vector PDF.

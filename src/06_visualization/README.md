@@ -1,9 +1,16 @@
-# Stage 6 — Visualization
+# Stage 6 — Cross-therapy visualization
 
-Generates the cross-therapy log₂FC scatter plot comparing chemo and radiation biomarkers.
+`biomarker_scatter.py` compares selected chemotherapy and radiotherapy reaction effects and writes an interactive HTML file with Plotly embedded for offline use.
 
-- Purple circles: reactions significant in **both** therapies (plotted at actual chemo/radio log2FC)
-- Teal triangles: chemo-only biomarkers (pinned to y = 0)
-- Amber squares: radio-only biomarkers (pinned to x = 0)
+- Purple circles: shared candidates, at their computed chemotherapy and radiotherapy summary coordinates.
+- Teal triangles: chemotherapy-only candidates, projected to the radiotherapy zero axis.
+- Orange squares: radiotherapy-only candidates, projected to the chemotherapy zero axis.
 
-Output is a self-contained interactive `biomarker_scatter.html` (Plotly). The y-axis uses a non-uniform scale that maps the extreme outlier at $-30$ to a position adjacent to $-7$ for readability, while preserving uniform pixel spacing between all ticks.
+The projected coordinate for a therapy-only candidate is a display convention, not a computed effect of zero in the other therapy. Both axes use piecewise-linear spacing between the displayed tick labels. Hover text retains the original effect values and explicitly identifies projections.
+
+```bash
+python src/06_visualization/biomarker_scatter.py \
+  --chemo results/biomarkers/Chemotherapy/biomarker_rxns_mapped.csv \
+  --radio results/biomarkers/Radiation_Therapy/biomarker_rxns_mapped.csv \
+  --output results/biomarker_scatter.html
+```
